@@ -17,10 +17,18 @@ public:
 	// Physics attribute
 	float x, y;
 	float heading = 0.0f;
+
+	bool moving;
+	float vel_min = 8.0, vel_max = 800.0;
+	sf::Vector2f speed;
+	float acceleration, deceleration;
+	float drag;
+
 	Player();
 	virtual ~Player();
 	static int update(lua_State*);
 	static int render(lua_State*);
+	static int move(lua_State*);
 };
 
 #endif /* PLAYER_H_ */

@@ -18,18 +18,21 @@ private:
 	sf::Event event;
 
 	sf::Clock clock;
-	float timer;
+	sf::Clock dt_clock;
+	float timer, delta_time;
 
 	Player* player;
 
 	lua_State* L;
 
 	// Scripts
-	std::string scr_update, scr_render;
+	std::string scr_update, scr_render, src_keypressed, src_keyreleased;
 
 	// Private methods
 	void handleInput();
 	void loadScripts();
+	void onKeyPressed(sf::Event::KeyEvent&);
+	void onKeyReleased(sf::Event::KeyEvent&);
 public:
 	static constexpr float PI = 3.1415f;
 	static constexpr float TO_DEGREES = 180.f / Game::PI;
@@ -40,6 +43,7 @@ public:
 
 	// Getters
 	const bool isRunning() const { return window->isOpen(); }
+	const float getDeltaTime() const { return delta_time; }
 
 	// Methods
 	void update();

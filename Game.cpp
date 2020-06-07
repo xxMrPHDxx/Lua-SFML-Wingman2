@@ -23,11 +23,13 @@ Game::Game() {
 	L = luaL_newstate();
 	luaL_openlibs(L);
 
+	// Create a game table
 	lua_newtable(L);
 	lua_pushlightuserdata(L, this);
 	lua_setfield(L, -2, "ptr");
 	lua_setglobal(L, "game");
 
+	// Create a player table
 	lua_newtable(L);
 	lua_pushlightuserdata(L, player);
 	lua_setfield(L, -2, "ptr");
@@ -35,18 +37,42 @@ Game::Game() {
 
 	// Register variables and methods for player
 	lua_getglobal(L, "player");
-
 	for(std::string idx : { "idx_auras", "idx_cpits", "idx_lwing", "idx_rwing" }){
 		lua_pushinteger(L, 0);
 		lua_setfield(L, -2, idx.c_str());
 	}
-
-	lua_pushcfunction(L, Player::update);
-	lua_setfield(L, -2, "update");
-	lua_pushcfunction(L, Player::render);
-	lua_setfield(L, -2, "render");
-
+	luaL_Reg methods[] = {
+		{ "update", Player::update },
+		{ "render", Player::render },
+		{ "move", Player::move }
+	};
+	for(luaL_Reg* reg=&methods[0]; reg<&methods[sizeof(methods)/sizeof(luaL_Reg)]; reg++){
+		lua_pushcfunction(L, reg->func);
+		lua_setfield(L, -2, reg->name);
+	}
 	lua_pop(L, 1);
+
+	// Setup keyboard keys
+	lua_newtable(L);
+	std::ifstream ifs("Config/keyboard.cfg");
+	std::string name, key, _buf;
+	int code;
+	if(!ifs.is_open()){
+		printf("Failed to open keyboard config!\n");
+		exit(-1);
+	}
+	for(;!ifs.eof() && ifs >> name && ifs >> _buf && ifs >> key;){
+		try{
+			lua_pushinteger(L, code = std::stoi(key));
+			lua_setglobal(L, name.c_str());
+			lua_pushboolean(L, false);
+			lua_seti(L, -2, code);
+		}catch(std::invalid_argument& e){
+			std::cout << "Error: " << e.what() << std::endl;
+			exit(-1);
+		}
+	}
+	lua_setglobal(L, "keys");
 
 	loadScripts();
 }
@@ -59,6 +85,8 @@ void Game::handleInput(){
 	while(window->pollEvent(event)){
 		switch(event.type){
 			case sf::Event::Closed: window->close(); break;
+			case sf::Event::KeyPressed: onKeyPressed(event.key); break;
+			case sf::Event::KeyReleased: onKeyReleased(event.key); break;
 			default: break;
 		}
 	}
@@ -67,9 +95,28 @@ void Game::handleInput(){
 void Game::loadScripts(){
 	scr_update = ResourceManager::load_textfile("Scripts/update.lua");
 	scr_render = ResourceManager::load_textfile("Scripts/render.lua");
+	src_keypressed = ResourceManager::load_textfile("Scripts/key_pressed.lua");
+	src_keyreleased = ResourceManager::load_textfile("Scripts/key_released.lua");
+}
+
+void Game::onKeyPressed(sf::Event::KeyEvent& e){
+	lua_pushinteger(L, e.code);
+	lua_setglobal(L, "key");
+	if(luaL_dostring(L, src_keypressed.c_str())){
+		printf("Error: %s\n", lua_tostring(L, -1));
+	}
+}
+
+void Game::onKeyReleased(sf::Event::KeyEvent& e){
+	lua_pushinteger(L, e.code);
+	lua_setglobal(L, "key");
+	if(luaL_dostring(L, src_keyreleased.c_str())){
+		printf("Error: %s\n", lua_tostring(L, -1));
+	}
 }
 
 void Game::update(){
+	delta_time = dt_clock.restart().asMilliseconds() / 1000.f;
 	handleInput();
 	timer += clock.restart().asMilliseconds();
 
@@ -93,6 +140,8 @@ void Game::update(){
 
 void Game::render(){
 	window->clear();
+	sf::Sprite bg(*ResourceManager::textures["Backgrounds"][16]);
+	window->draw(bg);
 	if(luaL_dostring(L, scr_render.c_str())){
 		printf("Error: %s\n", lua_tostring(L, -1));
 	}
@@ -104,7 +153,7 @@ void Game::update_player_sprite(Player* p, sf::Vector2f mouse){
 	sf::Vector2f d = sf::Vector2f(p->x, p->y) - mouse;
 	float angle = std::atan2(d.y, d.x);
 	if(angle < 0.0f) angle += PI;
-	player->heading = angle;
+	p->heading = angle;
 }
 
 void Game::draw_player_aura(Player* p, int idx_auras){
@@ -130,11 +179,18 @@ void Game::draw_player_wing(Player* p, int idx_lwing, int idx_rwing){
 	p->sLwing.setTexture(tex_lwing);
 	p->sRwing.setTexture(tex_rwing);
 
-	// Set the origin
+	// Wing animation direction
+	float angle_prog = 10 * std::sin(timer / 200.f);
+	sf::Vector2f dir(std::cos(p->heading)*angle_prog, std::sin(p->heading)*angle_prog);
+
 	for(sf::Sprite* spr : {&p->sLwing, &p->sRwing}){
+		// Set the origin
 		sf::FloatRect bounds = spr->getLocalBounds();
 		sf::Vector2f origin(bounds.width/2, bounds.height/2);
 		spr->setOrigin(origin);
+
+		// Set the wing movement
+		spr->setPosition(p->x + dir.x, p->y + dir.y);
 	}
 
 	window->draw(p->sLwing);
